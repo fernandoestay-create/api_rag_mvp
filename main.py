@@ -2,92 +2,100 @@ import os
 import pickle
 import faiss
 import numpy as np
+import traceback
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
-# ==============================================================================
-# CONFIGURACIÓN (SOLO HyC)
-# ==============================================================================
+app = FastAPI(title="API RAG HyC", version="DEBUG")
 
-app = FastAPI(title="API RAG HyC", version="3.0")
-
-# Definimos la ruta FIJA a tu carpeta HyC
-# Esto busca en: /app/index/HyC/faiss.index
+# Definimos rutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PATH_HYC = os.path.join(BASE_DIR, "index", "HyC")
-
-print(f"📂 Ruta configurada para HyC: {PATH_HYC}")
-
-# Variables globales para guardar en memoria
+PATH_HYC = os.path.join(BASE_DIR, "Index", "HyC")
 resources = {}
 
 @app.on_event("startup")
 def load_resources():
-    print("⏳ Iniciando carga de recursos HyC...")
+    print(f"🚀 INICIANDO CARGA. Directorio base: {BASE_DIR}")
+    print(f"📂 Buscando archivos en: {PATH_HYC}")
     
-    # 1. Cargar Modelo (El cerebro)
-    resources['model'] = SentenceTransformer('all-MiniLM-L6-v2')
-    
-    # 2. Cargar Índice y Metadata desde la carpeta HyC
-    faiss_file = os.path.join(PATH_HYC, "faiss.index")
-    meta_file = os.path.join(PATH_HYC, "metadata.pkl")
-    
-    if os.path.exists(faiss_file) and os.path.exists(meta_file):
-        resources['index'] = faiss.read_index(faiss_file)
-        with open(meta_file, "rb") as f:
-            resources['metadata'] = pickle.load(f)
-        print("✅ ¡Base de datos HyC cargada exitosamente!")
-    else:
-        print(f"❌ ERROR CRÍTICO: No encuentro los archivos en {PATH_HYC}")
-        # No detenemos el server para que puedas ver el log en Render, 
-        # pero la búsqueda fallará si esto no carga.
+    try:
+        # Verificamos si la carpeta existe
+        if not os.path.exists(PATH_HYC):
+            print(f"❌ LA CARPETA {PATH_HYC} NO EXISTE.")
+            print(f"   Contenido de {BASE_DIR}: {os.listdir(BASE_DIR)}")
+            return
 
-# ==============================================================================
-# MODELO DE DATOS (Lo que ChatGPT envía)
-# ==============================================================================
+        # Verificamos archivos
+        files = os.listdir(PATH_HYC)
+        print(f"📄 Archivos encontrados en HyC: {files}")
+
+        faiss_path = os.path.join(PATH_HYC, "faiss.index")
+        meta_path = os.path.join(PATH_HYC, "metadata.pkl")
+
+        if "faiss.index" not in files or "metadata.pkl" not in files:
+            print("❌ FALTAN ARCHIVOS CRÍTICOS (faiss.index o metadata.pkl)")
+            return
+
+        print("⏳ Cargando modelo IA...")
+        resources['model'] = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        print("⏳ Cargando índice FAISS...")
+        resources['index'] = faiss.read_index(faiss_path)
+        
+        print("⏳ Cargando metadatos...")
+        with open(meta_path, "rb") as f:
+            resources['metadata'] = pickle.load(f)
+            
+        print("✅ SISTEMA LISTO Y CARGADO CORRECTAMENTE")
+
+    except Exception as e:
+        print("🔥 ERROR FATAL EN EL ARRANQUE:")
+        traceback.print_exc()
 
 class SearchRequest(BaseModel):
-    # CORRECCIÓN CLAVE: Usamos 'question' porque eso es lo que envía ChatGPT.
-    # Antes tenías 'text' y por eso daba Error 422.
     question: str
-    
-    # Opcional: Aunque sea solo HyC, lo dejamos para que no falle si GPT envía el campo.
     project: str = "HyC"
-
-# ==============================================================================
-# ENDPOINT DE BÚSQUEDA
-# ==============================================================================
 
 @app.post("/search")
 def search(req: SearchRequest):
+    print(f"🔍 SEARCH SOLICITADO: '{req.question}'")
     
-    # Verificación de seguridad
-    if 'index' not in resources or 'metadata' not in resources:
-        raise HTTPException(status_code=500, detail="La base de datos HyC no está cargada en el servidor.")
+    try:
+        # 1. Chequeo de Salud
+        if 'index' not in resources:
+            error_msg = "⛔ El servidor arrancó pero NO CARGÓ el índice. Revisa los logs de inicio."
+            print(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        # 2. Búsqueda
+        model = resources['model']
+        index = resources['index']
+        metadata = resources['metadata']
+
+        vector = model.encode([req.question])
+        D, I = index.search(vector, 5)
+
+        results = []
+        for i, idx in enumerate(I[0]):
+            if idx == -1: continue
+            if idx >= len(metadata):
+                print(f"⚠️ Índice {idx} fuera de rango en metadata (Len: {len(metadata)})")
+                continue
+                
+            item = metadata[idx]
+            results.append({
+                "text": item.get('text', '')[:1000],
+                "document": item.get('document', 'Doc'),
+                "page": item.get('page', 0),
+                "url": item.get('url', ''),
+                "score": float(D[0][i])
+            })
         
-    # 1. Vectorizar la pregunta
-    query_vector = resources['model'].encode([req.question])
-    
-    # 2. Buscar en el índice (Top 5 resultados)
-    D, I = resources['index'].search(query_vector, 5)
-    
-    results = []
-    indices = I[0] # Lista de IDs encontrados
-    scores = D[0]  # Lista de puntuaciones (distancia)
-    
-    for i, idx in enumerate(indices):
-        if idx == -1: continue # Resultado vacío
-        
-        # Recuperar la info real del archivo metadata
-        meta = resources['metadata'][idx]
-        
-        results.append({
-            "text": meta.get('text', '')[:1500],
-            "document": meta.get('document', 'Desconocido'),
-            "page": meta.get('page', 0),
-            "url": meta.get('url', 'Sin Link'), # <--- AQUÍ VIAJA TU LINK
-            "score": float(scores[i])
-        })
-        
-    return {"results": results}
+        print(f"✅ Búsqueda exitosa. Retornando {len(results)} resultados.")
+        return {"results": results}
+
+    except Exception as e:
+        print("🔥 EXCEPCIÓN OCURRIDA DURANTE LA BÚSQUEDA:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
