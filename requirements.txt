@@ -4,3 +4,5 @@ sentence-transformers
 faiss-cpu
 numpy
 pydantic
+requests
+pypdf  <--- AGREGA ESTO
