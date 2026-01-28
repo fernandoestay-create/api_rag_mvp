@@ -19,7 +19,6 @@ app = FastAPI()
 
 # --- 2. CARGA DE DATOS ---
 BASE_DIR = Path(__file__).parent
-# ¡AQUÍ ESTÁ EL CAMBIO! Apunta a la carpeta sin tildes
 CARPETA_INDICE = BASE_DIR / "Index_global" 
 
 print("⏳ Cargando cerebro (Index + Metadata)...")
@@ -51,7 +50,7 @@ def get_embedding(text):
 
 @app.get("/")
 def home():
-    return {"status": "online", "message": "API RAG v2 (Global) funcionando 🚀"}
+    return {"status": "online", "message": "API RAG v2 (Global) con Trazabilidad Full 🚀"}
 
 @app.post("/chat")
 def chat_endpoint(request: QueryRequest):
@@ -64,11 +63,11 @@ def chat_endpoint(request: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error vectorizando: {e}")
 
-    # 2. Buscar
+    # 2. Buscar (Top 5 fragmentos)
     k = 5
     D, I = index.search(query_vector, k)
 
-    # 3. Recuperar texto
+    # 3. Recuperar texto + METADATA DETALLADA
     contexto_encontrado = ""
     fuentes = []
 
@@ -76,19 +75,38 @@ def chat_endpoint(request: QueryRequest):
         idx = I[0][i]
         if idx < len(metadata_store):
             item = metadata_store[idx]
-            texto = item.get('contenido', '')
-            meta = item.get('metadata', {})
-            proyecto = meta.get('project', 'Desconocido')
-            archivo = meta.get('source', 'Desconocido')
             
-            fragmento = f"\n[Fuente: Proyecto {proyecto} | Archivo: {archivo}]\n{texto}\n"
+            # --- CORRECCIÓN CRÍTICA ---
+            # Tu chunker.py guarda los datos planos (no dentro de 'metadata' ni 'contenido')
+            # Extraemos directamente las llaves que definiste en chunker.py
+            
+            texto = item.get('text', '') 
+            proyecto = item.get('project', 'General')
+            archivo = item.get('document', 'Desconocido')
+            pagina = item.get('page', 'N/A')    # <--- AQUÍ RECUPERAMOS LA PÁGINA
+            url = item.get('url', 'No disp.')   # <--- AQUÍ RECUPERAMOS EL LINK
+            
+            # Construimos un bloque de texto muy claro para GPT
+            fragmento = f"""
+            [DOCUMENTO: {archivo} | PÁGINA: {pagina} | LINK: {url}]
+            {texto}
+            --------------------------------------------------
+            """
             contexto_encontrado += fragmento
-            fuentes.append(f"{proyecto} - {archivo}")
+            fuentes.append(f"{archivo} (Pág. {pagina})")
 
     # 4. Generar respuesta GPT
     prompt_sistema = """
-    Eres un asistente experto en proyectos de ingeniería. Responde BASADO SOLO en el contexto.
-    Si no sabes, di "No tengo información". Cita siempre Proyecto y Archivo.
+    Eres un asistente experto técnico (Asesor HyC).
+    
+    TU OBJETIVO: Responder basado EXCLUSIVAMENTE en el contexto proporcionado.
+    
+    REGLA DE ORO DE CITAS:
+    Cada vez que uses información, DEBES citar la fuente inmediatamente con este formato:
+    "El impacto es alto [Fuente: NombreArchivo.pdf | Pág: X]"
+    
+    Si el contexto incluye un LINK, inclúyelo también.
+    Si no encuentras la respuesta en el contexto, di "No tengo información en los documentos".
     """
     
     try:
