@@ -50,7 +50,7 @@ def get_embedding(text):
 
 @app.get("/")
 def home():
-    return {"status": "online", "message": "API RAG v2 (Global) con Trazabilidad Full 🚀"}
+    return {"status": "online", "message": "API RAG HyC v2.5 - Modo Asesor Experto 🚀"}
 
 @app.post("/chat")
 def chat_endpoint(request: QueryRequest):
@@ -76,17 +76,12 @@ def chat_endpoint(request: QueryRequest):
         if idx < len(metadata_store):
             item = metadata_store[idx]
             
-            # --- CORRECCIÓN CRÍTICA ---
-            # Tu chunker.py guarda los datos planos (no dentro de 'metadata' ni 'contenido')
-            # Extraemos directamente las llaves que definiste en chunker.py
-            
+            # Extraemos datos del chunk (basado en tu chunker.py)
             texto = item.get('text', '') 
-            proyecto = item.get('project', 'General')
             archivo = item.get('document', 'Desconocido')
-            pagina = item.get('page', 'N/A')    # <--- AQUÍ RECUPERAMOS LA PÁGINA
-            url = item.get('url', 'No disp.')   # <--- AQUÍ RECUPERAMOS EL LINK
+            pagina = item.get('page', 'N/A')
+            url = item.get('url', 'No disponible')
             
-            # Construimos un bloque de texto muy claro para GPT
             fragmento = f"""
             [DOCUMENTO: {archivo} | PÁGINA: {pagina} | LINK: {url}]
             {texto}
@@ -95,18 +90,23 @@ def chat_endpoint(request: QueryRequest):
             contexto_encontrado += fragmento
             fuentes.append(f"{archivo} (Pág. {pagina})")
 
-    # 4. Generar respuesta GPT
+    # 4. Generar respuesta GPT - PROMPT EVOLUCIONADO
     prompt_sistema = """
-    Eres un asistente experto técnico (Asesor HyC).
+    Eres Fernando, un Asesor Experto en Proyectos de Ingeniería y Evaluación Ambiental (EIA).
     
-    TU OBJETIVO: Responder basado EXCLUSIVAMENTE en el contexto proporcionado.
+    OBJETIVO: Responder de forma profesional, técnica y proactiva basándote en el contexto entregado.
     
-    REGLA DE ORO DE CITAS:
-    Cada vez que uses información, DEBES citar la fuente inmediatamente con este formato:
-    "El impacto es alto [Fuente: NombreArchivo.pdf | Pág: X]"
+    INSTRUCCIONES DE ANÁLISIS:
+    1. Si el usuario pregunta por impactos (ej. suelo) y el contexto menciona actividades relacionadas (ej. excavaciones, caminos, transporte), usa tu criterio técnico para explicar cómo esas actividades afectan dicho componente. No te limites a buscar la palabra exacta.
+    2. Mantén un tono ejecutivo: directo, claro y orientado a la toma de decisiones.
     
-    Si el contexto incluye un LINK, inclúyelo también.
-    Si no encuentras la respuesta en el contexto, di "No tengo información en los documentos".
+    REGLA ESTRÍCTA DE CITAS:
+    - Al final de cada párrafo o dato importante, añade la fuente: "[Fuente: NombreArchivo.pdf | Pág: X]".
+    - Si el contexto incluye un LINK, menciónalo al final si es relevante.
+    
+    SI NO HAY INFORMACIÓN:
+    - Si realmente el contexto no tiene nada que ver, di: "No hay información directa sobre [tema] en los documentos actuales". 
+    - Acto seguido, sugiere qué documentos faltan (ej. ICSARAS, Línea Base) para completar el análisis.
     """
     
     try:
@@ -114,9 +114,9 @@ def chat_endpoint(request: QueryRequest):
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt_sistema},
-                {"role": "user", "content": f"Contexto:\n{contexto_encontrado}\n\nPregunta: {request.question}"}
+                {"role": "user", "content": f"Contexto de documentos:\n{contexto_encontrado}\n\nPregunta del usuario: {request.question}"}
             ],
-            temperature=0
+            temperature=0.2 # Subimos levemente la temperatura para mayor fluidez analítica
         )
         respuesta_final = response.choices[0].message.content
     except Exception as e:
