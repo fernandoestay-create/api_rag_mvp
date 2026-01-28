@@ -1,8 +1,8 @@
 fastapi
 uvicorn
-sentence-transformers
+openai
+python-dotenv
 faiss-cpu
 numpy
 pydantic
-requests
-pypdf  <--- AGREGA ESTO
+pypdf

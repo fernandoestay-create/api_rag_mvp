@@ -2,128 +2,109 @@ import os
 import pickle
 import faiss
 import numpy as np
-import traceback
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
+from dotenv import load_dotenv
+from pathlib import Path
 
-app = FastAPI(title="API RAG Multi-Proyecto", version="4.0")
+# --- 1. CONFIGURACIÓN ---
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
-# --- CONFIGURACIÓN ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PATH_INDEX = os.path.join(BASE_DIR, "Index") # Carpeta raíz de índices
+api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key)
 
-resources = {
-    'model': None,
-    'index': None,      # Aquí combinaremos todos los índices
-    'metadata': []      # Aquí combinaremos toda la metadata
-}
+app = FastAPI()
 
-@app.on_event("startup")
-def load_resources():
-    print(f"🚀 INICIANDO CARGA MULTI-PROYECTO desde: {PATH_INDEX}")
-    
-    try:
-        if not os.path.exists(PATH_INDEX):
-            print(f"❌ ERROR: No existe la carpeta {PATH_INDEX}")
-            return
+# --- 2. CARGA DE DATOS ---
+BASE_DIR = Path(__file__).parent
+# ¡AQUÍ ESTÁ EL CAMBIO! Apunta a la carpeta sin tildes
+CARPETA_INDICE = BASE_DIR / "Index_global" 
 
-        # 1. Cargar Modelo IA
-        print("⏳ Cargando modelo IA...")
-        resources['model'] = SentenceTransformer('all-MiniLM-L6-v2')
-        
-        # 2. Buscar carpetas de proyectos (HyC, Maratue, Urbanya, etc.)
-        all_metadata = []
-        combined_index = None
-        
-        subcarpetas = [d for d in os.listdir(PATH_INDEX) if os.path.isdir(os.path.join(PATH_INDEX, d))]
-        print(f"📂 Proyectos detectados: {subcarpetas}")
+print("⏳ Cargando cerebro (Index + Metadata)...")
 
-        for proyecto in subcarpetas:
-            ruta_proy = os.path.join(PATH_INDEX, proyecto)
-            faiss_path = os.path.join(ruta_proy, "faiss.index")
-            meta_path = os.path.join(ruta_proy, "metadata.pkl")
+try:
+    if (CARPETA_INDICE / "faiss.index").exists():
+        index = faiss.read_index(str(CARPETA_INDICE / "faiss.index"))
+        with open(CARPETA_INDICE / "metadata.pkl", "rb") as f:
+            metadata_store = pickle.load(f)
+        print(f"✅ ¡Cerebro cargado! {len(metadata_store)} fragmentos listos.")
+    else:
+        print("⚠️ Aún no existe la carpeta Index_global. Esperando migración...")
+        index = None
+        metadata_store = []
 
-            if os.path.exists(faiss_path) and os.path.exists(meta_path):
-                print(f"   👉 Cargando proyecto: {proyecto}")
-                
-                # Cargar índice parcial
-                idx_part = faiss.read_index(faiss_path)
-                
-                # Cargar metadata parcial
-                with open(meta_path, "rb") as f:
-                    meta_part = pickle.load(f)
-                    # Opcional: Agregar campo de proyecto si no viene
-                    for m in meta_part:
-                        if 'project' not in m: m['project'] = proyecto
-                
-                # FUSIÓN DE ÍNDICES FAISS
-                if combined_index is None:
-                    # Si es el primero, lo usamos base
-                    combined_index = idx_part
-                else:
-                    # Si ya hay uno, le agregamos el nuevo (Merge)
-                    combined_index.merge_from(idx_part, idx_part.ntotal)
-                
-                # FUSIÓN DE METADATA
-                all_metadata.extend(meta_part)
-                
-            else:
-                print(f"   ⚠️ Carpeta {proyecto} vacía o incompleta. Saltando.")
+except Exception as e:
+    print(f"❌ Error cargando índices: {e}")
+    metadata_store = []
+    index = None
 
-        # Guardar en recursos globales
-        if combined_index and len(all_metadata) > 0:
-            resources['index'] = combined_index
-            resources['metadata'] = all_metadata
-            print(f"✅ CARGA COMPLETA. Total documentos: {len(all_metadata)}")
-        else:
-            print("❌ NO SE CARGÓ NADA. Revisa tus carpetas.")
-
-    except Exception as e:
-        print("🔥 ERROR FATAL EN EL ARRANQUE:")
-        traceback.print_exc()
-
-class SearchRequest(BaseModel):
+# --- 3. MODELOS ---
+class QueryRequest(BaseModel):
     question: str
-    project: str = "General" # Ya no es obligatorio filtrar, busca en todo
 
-@app.post("/search")
-def search(req: SearchRequest):
-    print(f"🔍 SEARCH: '{req.question}'")
+# --- 4. ENDPOINTS ---
+def get_embedding(text):
+    text = text.replace("\n", " ")
+    return client.embeddings.create(input=[text], model="text-embedding-3-small").data[0].embedding
+
+@app.get("/")
+def home():
+    return {"status": "online", "message": "API RAG v2 (Global) funcionando 🚀"}
+
+@app.post("/chat")
+def chat_endpoint(request: QueryRequest):
+    if not index or not metadata_store:
+        raise HTTPException(status_code=500, detail="El índice no está cargado.")
+
+    # 1. Vectorizar pregunta
+    try:
+        query_vector = np.array([get_embedding(request.question)]).astype('float32')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error vectorizando: {e}")
+
+    # 2. Buscar
+    k = 5
+    D, I = index.search(query_vector, k)
+
+    # 3. Recuperar texto
+    contexto_encontrado = ""
+    fuentes = []
+
+    for i in range(k):
+        idx = I[0][i]
+        if idx < len(metadata_store):
+            item = metadata_store[idx]
+            texto = item.get('contenido', '')
+            meta = item.get('metadata', {})
+            proyecto = meta.get('project', 'Desconocido')
+            archivo = meta.get('source', 'Desconocido')
+            
+            fragmento = f"\n[Fuente: Proyecto {proyecto} | Archivo: {archivo}]\n{texto}\n"
+            contexto_encontrado += fragmento
+            fuentes.append(f"{proyecto} - {archivo}")
+
+    # 4. Generar respuesta GPT
+    prompt_sistema = """
+    Eres un asistente experto en proyectos de ingeniería. Responde BASADO SOLO en el contexto.
+    Si no sabes, di "No tengo información". Cita siempre Proyecto y Archivo.
+    """
     
     try:
-        if not resources['index']:
-            raise HTTPException(status_code=500, detail="El índice no está cargado.")
-
-        model = resources['model']
-        index = resources['index']
-        metadata = resources['metadata']
-
-        # Vectorizar y buscar
-        vector = model.encode([req.question])
-        # Buscamos más resultados (10) para tener variedad de proyectos
-        D, I = index.search(vector, 10) 
-
-        results = []
-        for i, idx in enumerate(I[0]):
-            if idx == -1 or idx >= len(metadata): continue
-                
-            item = metadata[idx]
-            
-            # FILTRO OPCIONAL: Si quisieras filtrar por proyecto en el futuro
-            # if req.project != "General" and item.get('project') != req.project: continue
-
-            results.append({
-                "text": item.get('text', '')[:1000],
-                "document": item.get('document', 'Doc'),
-                "project": item.get('project', 'Varios'), # Importante saber de qué proyecto vino
-                "page": item.get('page', 0),
-                "score": float(D[0][i])
-            })
-        
-        # Devolvemos los top 5 mejores después de filtrar
-        return {"results": results[:6]}
-
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {"role": "user", "content": f"Contexto:\n{contexto_encontrado}\n\nPregunta: {request.question}"}
+            ],
+            temperature=0
+        )
+        respuesta_final = response.choices[0].message.content
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        respuesta_final = f"Error GPT: {e}"
+
+    return {
+        "respuesta": respuesta_final,
+        "fuentes_consultadas": fuentes
+    }

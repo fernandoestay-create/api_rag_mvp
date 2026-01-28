@@ -1,82 +1,105 @@
 import os
-import pickle
 import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
+import pickle
+from openai import OpenAI
+from dotenv import load_dotenv
 from pypdf import PdfReader
 
 # --- CONFIGURACIÓN ---
-# Asume que tienes una carpeta "docs" al lado de este script
-RUTA_DOCS = os.path.join(os.path.dirname(__file__), "docs") 
+# Carga las claves
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key)
 
-# GUARDAMOS EN LA MISMA RUTA QUE USA MAIN.PY
-# Así no tienes que cambiar el servidor
-RUTA_SALIDA = os.path.join(os.path.dirname(__file__), "Index", "HyC")
+# RUTAS (Según tu nueva estructura)
+BASE_DIR = os.path.dirname(__file__)
+CARPETA_PDFS = os.path.join(BASE_DIR, "docs")          # Tus PDFs originales
+CARPETA_SALIDA = os.path.join(BASE_DIR, "Index_migración") # Tu nueva carpeta destino
 
-MODEL_NAME = 'all-MiniLM-L6-v2'
+def get_embedding_openai(text):
+    # Usamos el modelo "small" que es barato y rápido
+    text = text.replace("\n", " ")
+    return client.embeddings.create(input=[text], model="text-embedding-3-small").data[0].embedding
 
-def generar_cerebro_maestro():
-    print(f"🚀 INICIANDO GENERACIÓN MAESTRA")
-    print(f"📂 Leyendo desde: {RUTA_DOCS}")
+def generar_indice_nuevo():
+    print("🚀 INICIANDO GENERACIÓN V2 (Formato OpenAI)")
     
-    # 1. Crear carpeta de salida si no existe
-    if not os.path.exists(RUTA_SALIDA):
-        os.makedirs(RUTA_SALIDA)
-
-    datos = []
+    # 1. Verificar carpetas
+    if not os.path.exists(CARPETA_PDFS):
+        print(f"❌ Error: No encuentro la carpeta 'docs' en: {CARPETA_PDFS}")
+        return
     
-    # Recorremos todas las subcarpetas (los 4 proyectos)
-    for root, dirs, files in os.walk(RUTA_DOCS):
-        for file in files:
-            if file.lower().endswith(".pdf"):
-                ruta_completa = os.path.join(root, file)
-                # El nombre del proyecto es la carpeta inmediata dentro de docs
-                try:
-                    rel_path = os.path.relpath(root, RUTA_DOCS)
-                    proyecto = rel_path.split(os.sep)[0] 
-                    if proyecto == ".": proyecto = "General"
-                except:
-                    proyecto = "Desconocido"
+    if not os.path.exists(CARPETA_SALIDA):
+        os.makedirs(CARPETA_SALIDA)
+        print(f"📂 Carpeta creada: {CARPETA_SALIDA}")
 
-                print(f"   📖 Procesando: {file} | Proyecto: {proyecto}")
+    # 2. Leer PDFs
+    datos_procesados = []
+    print(f"📖 Leyendo archivos desde: {CARPETA_PDFS}")
+
+    for archivo in os.listdir(CARPETA_PDFS):
+        if archivo.lower().endswith(".pdf"):
+            ruta_pdf = os.path.join(CARPETA_PDFS, archivo)
+            print(f"   Procesando: {archivo}...")
+            
+            try:
+                reader = PdfReader(ruta_pdf)
+                texto_total = ""
+                for page in reader.pages:
+                    texto_total += page.extract_text() + "\n"
                 
-                try:
-                    reader = PdfReader(ruta_completa)
-                    for i, page in enumerate(reader.pages):
-                        texto = page.extract_text()
-                        if texto and len(texto) > 50:
-                            datos.append({
-                                "text": texto.replace('\n', ' ').strip(),
-                                "document": file,
-                                "page": i + 1,
-                                "project": proyecto,
-                                "url": f"file://{file}" 
-                            })
-                except Exception as e:
-                    print(f"   ❌ Error en {file}: {e}")
+                # Cortamos en trozos (chunks) de 1000 caracteres
+                # Esto es importante para que la IA no se pierda
+                tamano_chunk = 1000
+                for i in range(0, len(texto_total), tamano_chunk):
+                    chunk = texto_total[i : i + tamano_chunk]
+                    if len(chunk) > 100: # Ignoramos trozos muy pequeños
+                        datos_procesados.append({
+                            "contenido": chunk,
+                            "metadata": {"source": archivo}
+                        })
+            except Exception as e:
+                print(f"   ⚠️ Error leyendo {archivo}: {e}")
 
-    print(f"📚 Total fragmentos extraídos: {len(datos)}")
-    
-    if len(datos) == 0:
-        print("⚠️ NO SE ENCONTRARON DATOS. Revisa tu carpeta 'docs'.")
+    if not datos_procesados:
+        print("❌ No se extrajo texto. Revisa tus PDFs.")
         return
 
-    # 2. Vectorizar
-    print("🧠 Vectorizando con IA (Espere un momento)...")
-    model = SentenceTransformer(MODEL_NAME)
-    texts = [d['text'] for d in datos]
-    embeddings = model.encode(texts, show_progress_bar=True)
+    print(f"🧠 Generando Embeddings para {len(datos_procesados)} fragmentos (Conectando a OpenAI)...")
+    
+    # 3. Vectorizar con OpenAI
+    lista_vectores = []
+    for i, item in enumerate(datos_procesados):
+        try:
+            vector = get_embedding_openai(item['contenido'])
+            lista_vectores.append(vector)
+            if i % 5 == 0: print(f"   Progreso: {i}/{len(datos_procesados)}", end="\r")
+        except Exception as e:
+            print(f"   Error en vector {i}: {e}")
 
-    # 3. Guardar
-    print("💾 Guardando archivos en Index/HyC...")
-    index = faiss.IndexFlatL2(embeddings.shape[1])
-    index.add(np.array(embeddings).astype('float32'))
+    # 4. Guardar en Index_migración
+    print("\n💾 Guardando archivos finales...")
+    
+    # Guardar Metadata (Texto)
+    ruta_pkl = os.path.join(CARPETA_SALIDA, "metadata.pkl")
+    with open(ruta_pkl, "wb") as f:
+        pickle.dump(datos_procesados, f)
 
-    faiss.write_index(index, os.path.join(RUTA_SALIDA, "faiss.index"))
-    with open(os.path.join(RUTA_SALIDA, "metadata.pkl"), "wb") as f:
-        pickle.dump(datos, f)
-
-    print("✅ ¡LISTO! Archivos faiss.index y metadata.pkl actualizados con TODOS los proyectos.")
+    # Guardar Índice (Vectores)
+    if lista_vectores:
+        dimension = len(lista_vectores[0]) # 1536
+        index = faiss.IndexFlatL2(dimension)
+        index.add(np.array(lista_vectores))
+        
+        ruta_index = os.path.join(CARPETA_SALIDA, "faiss.index")
+        faiss.write_index(index, ruta_index)
+        
+        print(f"✅ ¡ÉXITO! Archivos generados en: {CARPETA_SALIDA}")
+        print("   - faiss.index (Vectores OpenAI)")
+        print("   - metadata.pkl (Textos)")
+    else:
+        print("❌ Error crítico: No se generaron vectores.")
 
 if __name__ == "__main__":
-    generar_cerebro_maestro()
+    generar_indice_nuevo()
