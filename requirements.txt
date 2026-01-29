@@ -1,9 +1,6 @@
 fastapi
 uvicorn
 openai
+pinecone>=3.0.0
 python-dotenv
-faiss-cpu
-numpy
 pydantic
-pypdf
-gdown
