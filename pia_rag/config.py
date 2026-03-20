@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # ── RAG ─────────────────────────────────────────────────
     top_k: int = 8
-    min_score: float = 0.70
+    min_score: float = 0.30
 
     # ── API (Render) ────────────────────────────────────────
     api_host: str = "0.0.0.0"

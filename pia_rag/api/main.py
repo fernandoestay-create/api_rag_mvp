@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from pia_rag.config import settings
@@ -24,6 +25,15 @@ app = FastAPI(
     title="PIA RAG API",
     version="2.0",
     description="API de consulta para la base de conocimiento ambiental PIA",
+)
+
+# CORS — permite que ChatGPT GPT Actions llame a la API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

@@ -154,9 +154,10 @@ class PineconeClient:
 
         # Format results
         formatted = []
-        for match in results.get("matches", []):
-            meta = match.get("metadata", {})
-            score = match.get("score", 0.0)
+        matches = results.matches if hasattr(results, "matches") else results.get("matches", [])
+        for match in matches:
+            meta = match.metadata if hasattr(match, "metadata") else match.get("metadata", {})
+            score = match.score if hasattr(match, "score") else match.get("score", 0.0)
             if score < settings.min_score:
                 continue
             formatted.append({
@@ -183,10 +184,13 @@ class PineconeClient:
         """Retorna estadísticas del índice."""
         try:
             stats = self._index.describe_index_stats()
+            total = stats.total_vector_count if hasattr(stats, "total_vector_count") else stats.get("total_vector_count", 0)
+            dim = stats.dimension if hasattr(stats, "dimension") else stats.get("dimension", 0)
+            fullness = stats.index_fullness if hasattr(stats, "index_fullness") else stats.get("index_fullness", 0)
             return {
-                "total_vectors": stats.get("total_vector_count", 0),
-                "dimension": stats.get("dimension", 0),
-                "index_fullness": stats.get("index_fullness", 0),
+                "total_vectors": total,
+                "dimension": dim,
+                "index_fullness": fullness,
             }
         except Exception as e:
             logger.error(f"Error obteniendo stats: {e}")
