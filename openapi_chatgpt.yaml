@@ -8,7 +8,7 @@ info:
   version: 2.0.0
 
 servers:
-  - url: https://api-rag-mvp.onrender.com
+  - url: https://api-rag-hyc.onrender.com
 
 paths:
   /search:

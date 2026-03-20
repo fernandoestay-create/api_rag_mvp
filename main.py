@@ -1,14 +1,10 @@
 """
-main.py — CLI principal del sistema PIA RAG.
+main.py — Punto de entrada dual:
+  - Render (uvicorn main:app)  → sirve la FastAPI
+  - CLI    (python main.py)    → comandos ingest/status/query
 
-Comandos:
-  python main.py ingest --project data/projects/proyecto_x
-  python main.py ingest --all
-  python main.py ingest --project data/projects/proyecto_x --resume
-  python main.py ingest --project data/projects/proyecto_x --retry-failed
-  python main.py status
-  python main.py status --project proyecto_x
-  python main.py query "medidas de mitigación" --project proyecto_x
+Render ejecuta: uvicorn main:app --host 0.0.0.0 --port $PORT
+CLI ejecuta:    python main.py ingest --project ...
 """
 
 from __future__ import annotations
@@ -17,13 +13,17 @@ import json
 from pathlib import Path
 from typing import Optional
 
+# ─── FastAPI app — Render busca "main:app" ─────────────────────────────────
+from pia_rag.api.main import app  # noqa: F401  ← Render usa esto
+
+# ─── CLI (solo se usa al ejecutar python main.py directamente) ─────────────
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from pia_rag.config import settings
 
-app = typer.Typer(
+cli = typer.Typer(
     name="pia-rag",
     help="PIA RAG — Sistema RAG para expedientes de evaluación ambiental",
 )
@@ -32,7 +32,7 @@ console = Console()
 
 # ── Ingest ──────────────────────────────────────────────────────────────────
 
-@app.command()
+@cli.command()
 def ingest(
     project: Optional[str] = typer.Option(None, help="Ruta a carpeta del proyecto"),
     all: bool = typer.Option(False, "--all", help="Procesar todos los proyectos"),
@@ -95,7 +95,7 @@ def _print_stats(stats: dict):
 
 # ── Status ──────────────────────────────────────────────────────────────────
 
-@app.command()
+@cli.command()
 def status(
     project: Optional[str] = typer.Option(None, help="ID del proyecto"),
 ):
@@ -169,7 +169,7 @@ def status(
 
 # ── Query ───────────────────────────────────────────────────────────────────
 
-@app.command()
+@cli.command()
 def query(
     question: str = typer.Argument(..., help="Pregunta en lenguaje natural"),
     project: Optional[str] = typer.Option(None, help="Filtrar por proyecto"),
@@ -208,4 +208,4 @@ def query(
 
 
 if __name__ == "__main__":
-    app()
+    cli()
