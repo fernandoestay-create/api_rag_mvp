@@ -1,0 +1,197 @@
+openapi: 3.1.0
+info:
+  title: PIA RAG API - Environmental Assessment Knowledge Base
+  description: |
+    Search engine for Chilean environmental assessment documents (EIA/DIA).
+    Contains 100,000+ indexed fragments from 12 real projects with hierarchical metadata.
+    Each result includes: exact page number, chapter, section, subsection, project info, and document type.
+  version: 2.0.0
+
+servers:
+  - url: https://api-rag-mvp.onrender.com
+
+paths:
+  /search:
+    post:
+      operationId: searchDocuments
+      summary: Search the environmental project knowledge base with semantic search and metadata filters
+      description: |
+        Performs semantic search across all indexed environmental documents.
+        Use filters to narrow results by project, document type, chapter, or granularity level.
+
+        IMPORTANT SEARCH TIPS:
+        - Always use project_id filter when the user asks about a specific project
+        - Use doc_type filter to search only in EIA, RCA, ICSARA, ADENDA, etc.
+        - Use chapter_title for topic-based search (e.g., "Línea Base", "Impacto", "Medida")
+        - For broad questions, use top_k=15 or 20
+        - For critique/comparison, search in multiple projects separately
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: |
+                    Natural language search query in Spanish.
+                    Be specific: "medidas mitigación flora nativa" is better than "medidas".
+                    Include key technical terms from the environmental domain.
+                project_id:
+                  type: string
+                  description: |
+                    Filter by specific project folder ID. Available projects:
+                    - ampliacion_parque_del_recuerdo___los_parques
+                    - barrio_hacienda_norte___crillon
+                    - centro_logistico_la_farfana___bodeg_san_francisco
+                    - centro_logistico_lo_aguirre___bodeg_san_francisco
+                    - centro_logistico_nuevo_maipu___rentas_y_desarr__aconcagua
+                    - fantasilandia___comercial_itahue
+                    - hyc
+                    - inmobiliaria_los_condores___proy_inmob_alerces
+                    - instituto_del_cancer___independencia
+                    - las_lilas_sanitaria
+                    - maratue
+                    - urbanya
+                doc_type:
+                  type: string
+                  enum: [EIA, DIA, RCA, ICSARA, ADENDA, ICE, ANEXO, RESOLUCION]
+                  description: |
+                    Filter by document type:
+                    - EIA: Estudio de Impacto Ambiental (main chapters)
+                    - DIA: Declaración de Impacto Ambiental
+                    - RCA: Resolución de Calificación Ambiental
+                    - ICSARA: Informe Consolidado de Solicitud de Aclaraciones
+                    - ADENDA: Adendas y adendas complementarias/extraordinarias
+                    - ICE: Informe Consolidado de Evaluación
+                    - ANEXO: Anexos temáticos (flora, fauna, ruido, etc.)
+                    - RESOLUCION: Resoluciones administrativas
+                chunk_level:
+                  type: string
+                  enum: [chapter, section, subsection]
+                  description: |
+                    Granularity level of results:
+                    - chapter: broad overview chunks (good for summaries)
+                    - section: medium granularity (most common, good default)
+                    - subsection: fine-grained detail (good for specific methodologies or data)
+                chapter_title:
+                  type: string
+                  description: |
+                    Filter by chapter name (partial match). Common values:
+                    - "Descripción" (project description)
+                    - "Línea Base" or "Linea Base" (environmental baseline)
+                    - "Impacto" (impact assessment)
+                    - "Medida" or "Mitigación" (mitigation measures)
+                    - "Seguimiento" (monitoring plan)
+                    - "Contingencia" (contingency plan)
+                top_k:
+                  type: integer
+                  default: 8
+                  minimum: 1
+                  maximum: 20
+                  description: Number of results to return. Use 15-20 for broad or comparative questions.
+      responses:
+        "200":
+          description: Search results with metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text:
+                          type: string
+                          description: The actual document text fragment
+                        score:
+                          type: number
+                          description: Semantic similarity score (0-1, higher is better)
+                        project_id:
+                          type: string
+                        project_name:
+                          type: string
+                        doc_type:
+                          type: string
+                          description: "EIA, DIA, RCA, ICSARA, ADENDA, etc."
+                        chapter_num:
+                          type: string
+                        chapter_title:
+                          type: string
+                        section_num:
+                          type: string
+                        section_title:
+                          type: string
+                        subsection_num:
+                          type: string
+                        subsection_title:
+                          type: string
+                        page_start:
+                          type: integer
+                          description: Exact page number in the original PDF
+                        page_end:
+                          type: integer
+                        hierarchy_path:
+                          type: string
+                          description: "Full path like '3 > 3.2 > 3.2.1'"
+                        chunk_level:
+                          type: string
+                  total_found:
+                    type: integer
+                  filters_applied:
+                    type: object
+
+  /projects:
+    get:
+      operationId: listProjects
+      summary: List all available projects with their indexing status
+      description: Returns all projects in the knowledge base with chunk counts and document types available.
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project_id:
+                          type: string
+                        project_name:
+                          type: string
+                        total_chunks:
+                          type: integer
+                        total_pdfs:
+                          type: integer
+                        doc_types:
+                          type: array
+                          items:
+                            type: string
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check API and Pinecone connection status
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  pinecone:
+                    type: string
+                  vectors:
+                    type: integer
