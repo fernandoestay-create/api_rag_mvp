@@ -141,6 +141,9 @@ paths:
                           description: "Full path like '3 > 3.2 > 3.2.1'"
                         chunk_level:
                           type: string
+                        filename:
+                          type: string
+                          description: "Original PDF filename (e.g. 'Capítulo 3 - Línea Base.pdf')"
                   total_found:
                     type: integer
                   filters_applied:

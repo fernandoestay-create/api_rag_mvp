@@ -82,6 +82,17 @@ def _find_pdfs(project_dir: Path) -> list[Path]:
     return pdfs
 
 
+def _load_gdrive_map() -> dict[str, dict[str, str]]:
+    """Carga el mapeo filename → Google Drive URL desde gdrive_map.json."""
+    map_file = settings.base_dir / "data" / "gdrive_map.json"
+    if map_file.exists():
+        data = json.loads(map_file.read_text(encoding="utf-8"))
+        logger.info(f"Google Drive map cargado: {sum(len(v) for v in data.values())} archivos")
+        return data
+    logger.warning("No se encontró data/gdrive_map.json — URLs quedarán vacías")
+    return {}
+
+
 class EnrichedETLPipeline:
     """
     Pipeline ETL completo: PDF → parse → chunk → embed → Pinecone.
@@ -95,6 +106,7 @@ class EnrichedETLPipeline:
         self._parser = DocumentStructureParser()
         self._chunker = EnrichedHierarchicalChunker()
         self._pinecone: Optional[PineconeClient] = None
+        self._gdrive_map: dict[str, dict[str, str]] = _load_gdrive_map()
 
     def _get_pinecone(self) -> PineconeClient:
         """Lazy init del cliente Pinecone."""
@@ -158,10 +170,16 @@ class EnrichedETLPipeline:
                 ext_logger.file_skipped(filename)
                 continue
 
-            # Process single PDF
+            # Process single PDF — inject Google Drive URL into project_meta
             start = time.time()
             try:
-                chunks, structure = self._process_single_pdf(pdf_path, project_meta, ext_logger)
+                # Look up Google Drive URL for this PDF
+                pdf_meta = dict(project_meta)  # copy
+                gdrive_project = self._gdrive_map.get(project_dir.name, {})
+                gdrive_url = gdrive_project.get(filename, "")
+                pdf_meta["url"] = gdrive_url
+
+                chunks, structure = self._process_single_pdf(pdf_path, pdf_meta, ext_logger)
                 duration = time.time() - start
 
                 if chunks and structure:

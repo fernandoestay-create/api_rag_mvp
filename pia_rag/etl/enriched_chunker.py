@@ -60,6 +60,7 @@ class EnrichedChunk:
     source: str            # "seia"
     doc_type: str          # "EIA" | "DIA" | "RCA" | etc
     title: str             # "Capítulo 3 - Línea Base"
+    filename: str          # nombre del archivo PDF original
     date: str
     url: str
 
@@ -107,6 +108,7 @@ class EnrichedChunk:
             "doc_type": self.doc_type,
             "doc_id": self.doc_id,
             "title": self.title,
+            "filename": self.filename,
             "date": self.date,
             "url": self.url,
             "project_id": self.project_id,
@@ -515,6 +517,7 @@ class EnrichedHierarchicalChunker:
             source=project_meta.get("source", "seia"),
             doc_type=doc_type,
             title=title,
+            filename=structure.filename,
             date=project_meta.get("ingreso_date", ""),
             url=project_meta.get("url", ""),
             project_id=project_meta.get("project_id", ""),

@@ -173,6 +173,7 @@ class PineconeClient:
                 "hierarchy_path": meta.get("hierarchy_path", ""),
                 "chunk_level": meta.get("chunk_level", ""),
                 "doc_type": meta.get("doc_type", ""),
+                "filename": meta.get("filename", ""),
                 "url": meta.get("url", ""),
             })
 

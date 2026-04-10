@@ -61,6 +61,7 @@ class SearchResult(BaseModel):
     hierarchy_path: str = ""
     chunk_level: str = ""
     doc_type: str = ""
+    filename: str = ""
     url: str = ""
 
 
