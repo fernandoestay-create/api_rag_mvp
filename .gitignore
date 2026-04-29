@@ -33,3 +33,7 @@ Thumbs.db
 
 # Scripts de ingesta local
 ingest_*.py
+SECRETS_MCP.txt
+*SECRETS*.txt
+.env.*
+*.env
